@@ -102,3 +102,49 @@ void MMIOServiceDeclOp::getPortList(SmallVectorImpl<ServicePortInfo> &ports) {
                           ChannelType::get(ctxt, IntegerType::get(ctxt, 32))}},
           /*resettable=*/UnitAttr())});
 }
+
+void HostMemoryServiceDeclOp::getPortList(
+    SmallVectorImpl<ServicePortInfo> &ports) {
+  auto *ctxt = getContext();
+
+  // TODO: Make this a list.
+  const unsigned DataXferSize = 4;
+  auto dataType = hw::ArrayType::get(IntegerType::get(ctxt, 8), DataXferSize);
+
+  // Read port.
+  ports.push_back(ServicePortInfo{
+      hw::InnerRefAttr::get(getSymNameAttr(), StringAttr::get(ctxt, "read")),
+      ChannelBundleType::get(
+          ctxt,
+          {
+              BundledChannel{
+                  StringAttr::get(ctxt, "read"), ChannelDirection::to,
+                  ChannelType::get(
+                      ctxt, hw::StructType::get(
+                                ctxt, {hw::StructType::FieldInfo{
+                                           StringAttr::get(ctxt, "address"),
+                                           IntegerType::get(ctxt, 64)},
+                                       hw::StructType::FieldInfo{
+                                           StringAttr::get(ctxt, "length"),
+                                           IntegerType::get(ctxt, 32)}}))},
+              BundledChannel{StringAttr::get(ctxt, "data"),
+                             ChannelDirection::from,
+                             ChannelType::get(ctxt, dataType)},
+          },
+          /*resettable=*/UnitAttr())});
+
+  // Write port.
+  ports.push_back(ServicePortInfo{
+      hw::InnerRefAttr::get(getSymNameAttr(), StringAttr::get(ctxt, "write")),
+      ChannelBundleType::get(
+          ctxt,
+          {
+              BundledChannel{
+                  StringAttr::get(ctxt, "address"), ChannelDirection::to,
+                  ChannelType::get(ctxt, IntegerType::get(ctxt, 32))},
+              BundledChannel{StringAttr::get(ctxt, "data"),
+                             ChannelDirection::to,
+                             ChannelType::get(ctxt, dataType)},
+          },
+          /*resettable=*/UnitAttr())});
+}

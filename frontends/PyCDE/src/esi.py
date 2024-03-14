@@ -6,8 +6,8 @@ from .common import (AppID, Input, Output, _PyProxy, PortError)
 from .module import Generator, Module, ModuleLikeBuilderBase, PortProxyBase
 from .signals import BundleSignal, ChannelSignal, Signal, _FromCirctValue
 from .system import System
-from .types import (Bits, Bundle, BundledChannel, ChannelDirection, Type, types,
-                    _FromCirctType)
+from .types import (Array, Bits, Bundle, BundledChannel, ChannelDirection,
+                    StructType, Type, types, _FromCirctType)
 
 from .circt import ir
 from .circt.dialects import esi as raw_esi, hw, msft
@@ -449,6 +449,26 @@ class MMIO:
 
   read = Bundle([
       BundledChannel("offset", ChannelDirection.TO, Bits(32)),
+      BundledChannel("data", ChannelDirection.FROM, Bits(32))
+  ])
+
+  @staticmethod
+  def _op(sym_name: ir.StringAttr):
+    return raw_esi.MMIOServiceDeclOp(sym_name)
+
+
+@ServiceDecl
+class HostMemory:
+  """ESI standard service to request access to an MMIO region."""
+  DataXferSize = 4
+
+  read = Bundle([
+      BundledChannel(
+          "read", ChannelDirection.TO,
+          StructType([
+              ("addr", Bits(64)),
+              ("data", Array(Bits(8), DataXferSize)),
+          ])),
       BundledChannel("data", ChannelDirection.FROM, Bits(32))
   ])
 

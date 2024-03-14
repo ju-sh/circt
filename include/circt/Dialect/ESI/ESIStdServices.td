@@ -82,3 +82,19 @@ def MMIOServiceDeclOp: ESI_Op<"service.std.mmio",
     $sym_name attr-dict
   }];
 }
+
+def HostMemoryServiceDeclOp: ESI_Op<"service.std.hostmem",
+          [HasParent<"::mlir::ModuleOp">, Symbol,
+           DeclareOpInterfaceMethods<ServiceDeclOpInterface>]> {
+  let summary = "Host memory service";
+  let description = [{
+    Declares a service to be backed by host memory. This is useful for
+    simulation and testing.
+  }];
+
+  let arguments = (ins SymbolNameAttr:$sym_name);
+
+  let assemblyFormat = [{
+    $sym_name attr-dict
+  }];
+}

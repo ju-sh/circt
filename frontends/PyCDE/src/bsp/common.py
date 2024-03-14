@@ -2,8 +2,13 @@
 #  See https://llvm.org/LICENSE.txt for license information.
 #  SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from __future__ import annotations
+from msilib import Control
+from turtle import write_docstringdict
+
+from ..behavioral import If
 from ..common import Clock, Input, Output
-from ..constructs import ControlReg, Mux, NamedWire, Wire
+from ..constructs import ControlReg, Mux, NamedWire, Reg, Wire
 from .. import esi
 from ..module import Module, generator
 from ..signals import BundleSignal
@@ -38,15 +43,19 @@ class AxiMMIO(esi.ServiceImplementation):
   a response, the MMIO service will hang. TODO: add some kind of timeout.
 
   Implementation-defined MMIO layout:
-    - 0x0: 0 constanst
-    - 0x4: 0 constanst
-    - 0x8: Magic number low (0xE5100E51)
-    - 0xC: Magic number high (random constant: 0x207D98E5)
-    - 0x10: ESI version number (0)
-    - 0x14: Location of the manifest ROM (absolute address)
+    - 0x00 (RO): 0 constanst
+    - 0x04 (RO): 0 constanst
+    - 0x08 (RO): Magic number low (0xE5100E51)
+    - 0x0C (RO): Magic number high (random constant: 0x207D98E5)
+    - 0x10 (RO): ESI version number (0)
+    - 0x14 (RO): Location of the manifest ROM (absolute address)
+    - 0x18 (WO): Host memory address to which to write the memory (64 bit). Must
+                 write separately to the low (0x18) and high part (0x1C) to
+                 initiate the write.
 
     - 0x100: Start of MMIO space for requests. Mapping is contained in the
              manifest so can be dynamically queried.
+
 
     - addr(Manifest ROM) + 0: Size of compressed manifest
     - addr(Manifest ROM) + 4: Start of compressed manifest
@@ -86,6 +95,9 @@ class AxiMMIO(esi.ServiceImplementation):
 
   # Start at this address for assigning MMIO addresses to service requests.
   initial_offset: int = 0x100
+
+  # Manifest DMA write address offset.
+  manifest_offset: int = 0x18
 
   @generator
   def generate(self, bundles: esi._ServiceGeneratorBundles):
@@ -179,7 +191,7 @@ class AxiMMIO(esi.ServiceImplementation):
     rom_address = NamedWire(
         (address_words.as_uint() - (manifest_loc >> 2)).as_bits(30),
         "rom_address")
-    mani_rom = ESI_Manifest_ROM(clk=self.clk, address=rom_address)
+    self.mani_rom = ESI_Manifest_ROM(clk=self.clk, address=rom_address)
     mani_valid = address_valid.reg(
         self.clk,
         self.rst,
@@ -191,14 +203,42 @@ class AxiMMIO(esi.ServiceImplementation):
 
     # Mux the output depending on whether or not the address is in the header.
     sel = NamedWire(~header_sel, "sel")
-    data_mux_inputs = [header_out, mani_rom.data]
+    data_mux_inputs = [header_out, self.mani_rom.data]
     data_pipeline.assign(Mux(sel, *data_mux_inputs))
     data_valid_mux_inputs = [header_response_valid, mani_valid]
     data_pipeline_valid.assign(Mux(sel, *data_valid_mux_inputs))
     rresp_mux_inputs = [header_rresp, mani_rresp]
     data_pipeline_rresp.assign(Mux(sel, *rresp_mux_inputs))
 
+  def build_manifest_write(self):
+    assert hasattr(self, "mani_rom")
+
+    trigger_write = Wire(Bits(1), "trigger_write")
+
+    # Capture the low 32 bits of the address to write to.
+    is_write_lo = (self.awaddr == self.manifest_offset) & self.awvalid
+    addr_lo = self.awaddr.reg(self.clk, ce=is_write_lo, name="addr_lo")
+    addr_lo_valid = ControlReg(self.clk,
+                               self.rst, [is_write_lo], [trigger_write],
+                               name="addr_lo_valid")
+
+    # Capture the high 32 bits of the address to write to.
+    is_write_hi = (self.awaddr == (self.manifest_offset + 0x4)) & self.awvalid
+    addr_hi = self.awaddr.reg(self.clk, ce=is_write_lo, name="addr_hi")
+    addr_hi_valid = ControlReg(self.clk,
+                               self.rst, [is_write_hi], [trigger_write],
+                               name="addr_hi_valid")
+
+    trigger_write.assign(addr_lo_valid & addr_hi_valid)
+
+    write_done = Wire(Bits(1), "write_done")
+    writing = ControlReg(self.clk,
+                         self.rst, [trigger_write], [write_done],
+                         name="writing")
+
   def build_write(self, bundles):
+    self.build_manifest_write()
+
     # TODO: this.
 
     # So that we don't wedge the AXI-lite for writes, just ack all of them.
@@ -212,3 +252,99 @@ class AxiMMIO(esi.ServiceImplementation):
     self.wready = 1
     self.bvalid = write_happened
     self.bresp = 0
+
+
+def AxiHostMemoryService(AddressWidth=64, DataWidth=64, IDWidth=6):
+
+  class AxiHostMemoryService(esi.ServiceImplementation):
+    """Service implementation for a host memory service with an AXI protocol."""
+
+    clk = Clock()
+    rst = Input(Bits(1))
+
+    #########################
+    # AXI4 master interface
+
+    # Address write channel
+    AWVALID = Output(Bits(1))
+    AWREADY = Input(Bits(1))
+    AWADDR = Output(Bits(AddressWidth))
+    AWID = Output(Bits(IDWidth))
+    AWLEN = Output(Bits(8))
+    AWSIZE = Output(Bits(3))
+    AWBURST = Output(Bits(2))
+    AWLOCK = Output(Bits(2))
+    AWCACHE = Output(Bits(4))
+    AWPROT = Output(Bits(3))
+    AWQOS = Output(Bits(4))
+    AWREGION = Output(Bits(4))
+
+    # Data write channel
+    WVALID = Output(Bits(1))
+    WREADY = Input(Bits(1))
+    WDATA = Output(Bits(DataWidth))
+    WSTRB = Output(Bits(DataWidth // 8))
+    WLAST = Output(Bits(1))
+
+    # Write response channel
+    BVALID = Input(Bits(1))
+    BREADY = Output(Bits(1))
+    BRESP = Input(Bits(2))
+    BID = Input(Bits(IDWidth))
+
+    # Address read channel
+    ARVALID = Output(Bits(1))
+    ARREADY = Input(Bits(1))
+    ARADDR = Output(Bits(AddressWidth))
+    ARID = Output(Bits(IDWidth))
+    ARLEN = Output(Bits(8))
+    ARSIZE = Output(Bits(3))
+    ARBURST = Output(Bits(2))
+    ARLOCK = Output(Bits(2))
+    ARCACHE = Output(Bits(4))
+    ARPROT = Output(Bits(3))
+    ARQOS = Output(Bits(4))
+    ARREGION = Output(Bits(4))
+
+    # Read data channel
+    RVALID = Input(Bits(1))
+    RREADY = Output(Bits(1))
+    RDATA = Input(Bits(DataWidth))
+    RLAST = Input(Bits(1))
+    RID = Input(Bits(IDWidth))
+    RRESP = Input(Bits(2))
+
+    @generator
+    def build(ports, bundles: esi._ServiceGeneratorBundles):
+      ports.AWVALID = 0
+      ports.AWADDR = 0
+      ports.AWID = 0
+      ports.AWLEN = 0
+      ports.AWSIZE = 0
+      ports.AWBURST = 0
+      ports.AWLOCK = 0
+      ports.AWCACHE = 0
+      ports.AWPROT = 0
+      ports.AWQOS = 0
+      ports.AWREGION = 0
+      ports.WVALID = 0
+      ports.WDATA = 0
+      ports.WSTRB = 0
+      ports.WLAST = 0
+      ports.BREADY = 0
+      ports.ARVALID = 0
+      ports.ARADDR = 0
+      ports.ARID = 0
+      ports.ARLEN = 0
+      ports.ARSIZE = 0
+      ports.ARBURST = 0
+      ports.ARLOCK = 0
+      ports.ARCACHE = 0
+      ports.ARPROT = 0
+      ports.ARQOS = 0
+      ports.ARREGION = 0
+      ports.RREADY = 0
+
+      assert len(bundles.to_client_reqs) == 0
+
+  return AxiHostMemoryService

@@ -47,6 +47,7 @@ install(FILES
 )
 
 add_custom_target(esi-cosim
+  DEPENDS EsiCosimDpiServer
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/esi-cosim.py
           ${CIRCT_TOOLS_DIR}/esi-cosim.py)

@@ -39,7 +39,7 @@ ipx::edit_ip_in_project -upgrade true -name tmp_prj -directory $package_path $pa
 
 set core [ipx::current_core]
 
-# Associate AXI data & AXI-Lite control interfaces
+# Create an AXI-Lite interface
 ipx::associate_bus_interfaces -busif s_axi_control -clock ap_clk $core
 
 # Create the address space for CSRs
@@ -66,7 +66,11 @@ set reg [::ipx::add_register "EsiManifestLoc" $addr_block]
   set_property address_offset 32 $reg
   set_property size 32 $reg
 
+# Associate the AXI-Lite interface with the address space
 set_property slave_memory_map_ref "s_axi_control" [::ipx::get_bus_interfaces -of $core "s_axi_control"]
+
+# Create the AXI host memory interface.
+ipx::associate_bus_interfaces -busif m_axi_gmem -clock ap_clk $core
 
 set_property xpm_libraries {XPM_CDC XPM_FIFO} $core
 set_property sdx_kernel true $core

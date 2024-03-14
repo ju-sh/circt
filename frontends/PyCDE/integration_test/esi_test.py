@@ -48,5 +48,3 @@ if __name__ == "__main__":
                    output_directory=sys.argv[1])
   s.compile()
   s.package()
-
-  s.print()

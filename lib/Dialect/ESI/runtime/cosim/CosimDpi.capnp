@@ -50,6 +50,11 @@ interface EsiDpiEndpoint @0xfb0a36bf859be47b {
   close @2 ();
 }
 
+interface EsiHostMemory @0xb566da0118690d14 {
+  write @0 (address :UInt64, data :Data) -> ();
+  read @1 (address :UInt64, size :UInt64) -> (data :Data);
+}
+
 # A low level interface simply provides MMIO and host memory access. In all
 # cases, hardware errors become exceptions.
 interface EsiLowLevel @0xae716100ef82f6d6 {
@@ -57,4 +62,7 @@ interface EsiLowLevel @0xae716100ef82f6d6 {
   writeMMIO @0 (address :UInt32, data :UInt32) -> ();
   # Read from an MMIO register.
   readMMIO  @1 (address :UInt32) -> (data :UInt32);
+
+  # Register an interface for the simulation to use to access host memory.
+  registerHostMemory @2 (mem :EsiHostMemory) -> ();
 }
