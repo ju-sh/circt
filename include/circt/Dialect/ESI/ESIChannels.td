@@ -367,10 +367,11 @@ def WindowFieldType : ESI_Type<"WindowField"> {
 
   let parameters = (ins
       "StringAttr":$fieldName,
-      OptionalParameter<"uint64_t", "# of items in arrays or lists">:$numItems);
+      OptionalParameter<"uint64_t", "# of items in arrays or lists">:$numItems,
+      OptionalParameter<"UnitAttr", "include bitvector of valid items">:$validItems);
 
   let assemblyFormat = [{
-    `<` $fieldName (`,` $numItems^)? `>`
+    `<` $fieldName (`,` $numItems^)? (`,` `valids` $validItems^)?`>`
   }];
 }
 

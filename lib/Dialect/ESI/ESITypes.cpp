@@ -24,6 +24,7 @@ using namespace circt::esi;
 
 AnyType AnyType::get(MLIRContext *context) { return Base::get(context); }
 
+UnitAttr attr;
 LogicalResult
 WindowType::verify(llvm::function_ref<InFlightDiagnostic()> emitError,
                    StringAttr name, Type into,
@@ -152,6 +153,12 @@ struct FieldParser<::BundledChannel, ::BundledChannel> {
     if (p.parseKeywordOrString(&name))
       return failure();
     return BundledChannel{StringAttr::get(p.getContext(), name), *dir, type};
+  }
+};
+template <>
+struct FieldParser<::UnitAttr, ::UnitAttr> {
+  static FailureOr<::UnitAttr> parse(AsmParser &p) {
+    return UnitAttr::get(p.getContext());
   }
 };
 } // namespace mlir

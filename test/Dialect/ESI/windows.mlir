@@ -60,3 +60,12 @@ hw.module @TypeAModulePassthrough(in %a: !TypeAwin1, out x: !TypeAwin1) {
   %x = hw.instance "foo" @TypeAModuleUnwrapWrap(a: %a: !TypeAwin1) -> (x: !TypeAwin1)
   hw.output %x : !TypeAwin1
 }
+
+!ListA = !esi.list<ui32>
+!ListAwin1 = !esi.window<
+  "ListAwin1", !ListA, [
+    <"FrameA", [
+      <"", 1, valids>
+    ]>
+  ]>
+hw.module @List1(in %a: )
