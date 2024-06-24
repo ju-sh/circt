@@ -32,8 +32,8 @@ jobs:
         build-shared: [ON, OFF]
         build-type: [Debug, Release]
         compiler:
-          - cc: clang
-            cxx: clang++
+          - cc: clang-13
+            cxx: clang++-13
           - cc: gcc
             cxx: g++
         lit-flags: ['', '--vg']
