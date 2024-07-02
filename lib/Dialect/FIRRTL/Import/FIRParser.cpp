@@ -4856,6 +4856,10 @@ ParseResult FIRCircuitParser::parseClass(CircuitOp circuit, unsigned indent) {
       parseToken(FIRToken::colon, "expected ':' in class definition") ||
       info.parseOptionalInfo() || parsePortList(portList, portLocs, indent))
     return failure();
+  llvm::outs()
+      << "Class " << name << " "
+      << translateLocation(getToken().getLoc()).cast<FileLineColLoc>().getLine()
+      << " ";
 
   if (name == circuit.getName())
     return mlir::emitError(info.getLoc(),
@@ -4875,7 +4879,13 @@ ParseResult FIRCircuitParser::parseClass(CircuitOp circuit, unsigned indent) {
 
   // Stash the class name -> op in the constants, so we can resolve Inst types.
   getConstants().classMap[name.getValue()] = classOp;
-  return skipToModuleEnd(indent);
+  auto result = skipToModuleEnd(indent);
+
+  llvm::outs()
+      << translateLocation(getToken().getLoc()).cast<FileLineColLoc>().getLine()
+      << " " << info.getLoc() << "\n";
+
+  return result;
 }
 
 /// extclass ::= 'extclass' id ':' info? INDENT portlist DEDENT
@@ -5021,6 +5031,9 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit, bool isPublic,
       parseToken(FIRToken::colon, "expected ':' in module definition") ||
       info.parseOptionalInfo() || parsePortList(portList, portLocs, indent))
     return failure();
+  llvm::outs() << "Module " << name << " "
+               << translateLocation(modLoc).cast<FileLineColLoc>().getLine()
+               << " ";
 
   // The main module is implicitly public.
   if (name == circuit.getName()) {
@@ -5063,6 +5076,9 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit, bool isPublic,
 
   if (skipToModuleEnd(indent))
     return failure();
+  llvm::outs()
+      << translateLocation(getToken().getLoc()).cast<FileLineColLoc>().getLine()
+      << " " << info.getLoc() << "\n";
   return success();
 }
 

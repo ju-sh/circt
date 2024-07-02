@@ -1698,11 +1698,14 @@ class DedupPass : public circt::firrtl::impl::DedupBase<DedupPass> {
         auto original = cast<FModuleLike>(it->second);
         // Record the group ID of the other module.
         dedupMap[moduleName] = original.getModuleNameAttr();
+        llvm::outs() << "[Dedup] " << original.getModuleNameAttr().getValue() << " "
+                     << moduleName.getValue() << "\n";
         deduper.dedup(original, module);
         ++erasedModules;
         anythingChanged = true;
         continue;
       }
+      llvm::outs() << "[Dedup] " << moduleName.getValue() << " " << moduleName.getValue() << "\n";
       // Any module not deduplicated must be recorded.
       deduper.record(module);
       // Add the module to a new dedup group.
