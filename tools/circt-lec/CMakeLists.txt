@@ -19,6 +19,7 @@ target_link_libraries(circt-lec
   CIRCTVerifToSMT
   CIRCTComb
   CIRCTHW
+  CIRCTSeq
   CIRCTSMT
   CIRCTSupport
   MLIRIR

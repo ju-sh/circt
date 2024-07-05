@@ -19,6 +19,7 @@
 #include "circt/Dialect/Comb/CombDialect.h"
 #include "circt/Dialect/HW/HWDialect.h"
 #include "circt/Dialect/SMT/SMTDialect.h"
+#include "circt/Dialect/Seq/SeqDialect.h"
 #include "circt/Support/Passes.h"
 #include "circt/Support/Version.h"
 #include "circt/Tools/circt-lec/Passes.h"
@@ -90,6 +91,12 @@ static cl::opt<bool>
                           cl::desc("Log executions of toplevel module passes"),
                           cl::init(false), cl::cat(mainCategory));
 
+static cl::opt<bool>
+    disableMatchComparePoints("disable-match-compare-points",
+                              cl::desc("Disable MatchComparePoints pass. "
+                                       "Construct SMT expressions for states"),
+                              cl::init(false), cl::cat(mainCategory));
+
 #ifdef CIRCT_LEC_ENABLE_JIT
 
 enum OutputFormat { OutputMLIR, OutputLLVM, OutputSMTLIB, OutputRunJIT };
@@ -159,7 +166,12 @@ static LogicalResult executeLEC(MLIRContext &context) {
     pm.addInstrumentation(
         std::make_unique<VerbosePassInstrumentation<mlir::ModuleOp>>(
             "circt-lec"));
-
+  if (!disableMatchComparePoints) {
+    MatchComparePointsOptions compareOptions;
+    compareOptions.firstModule = firstModuleName;
+    compareOptions.secondModule = secondModuleName;
+    pm.addPass(createMatchComparePoints(compareOptions));
+  }
   ConstructLECOptions constructLECOptions;
   constructLECOptions.firstModule = firstModuleName;
   constructLECOptions.secondModule = secondModuleName;
@@ -298,7 +310,7 @@ int main(int argc, char **argv) {
   registry.insert<circt::comb::CombDialect, circt::hw::HWDialect,
                   circt::smt::SMTDialect, mlir::func::FuncDialect,
                   mlir::LLVM::LLVMDialect, mlir::arith::ArithDialect,
-                  mlir::BuiltinDialect>();
+                  circt::seq::SeqDialect, mlir::BuiltinDialect>();
   mlir::func::registerInlinerExtension(registry);
   mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
