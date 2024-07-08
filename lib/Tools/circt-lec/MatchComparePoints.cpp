@@ -60,14 +60,15 @@ struct ComparePointsMatcher {
   using MatchingOperands = SmallVector<std::pair<OpOperand, OpOperand>>;
   using MatchingResults = SmallVector<std::pair<OpResult, OpResult>>;
   struct ComparePoint {
-    ArrayAttr instancePath;
     StringAttr originalName;
     Type type;
   };
 
+  static MapVector<std::pair<StringAttr, Type>, Operation *> getOperations(HWModuleOp module);
+
   using MatchingOps = SmallVector<Operation *>;
 
-  SmallVector<Operation *> match();
+  void match();
 
   struct PortMutation {
     SmallVector<Value> inputPorts;
@@ -78,7 +79,9 @@ struct ComparePointsMatcher {
   void applyPortMutations();
 };
 
-ComparePointsMatcher::MatchingOps ComparePointsMatcher::match() {
+llvm::MapVector<StringAttr, Operation *>
+ComparePointsMatcher::getOperations(HWModuleOp module) {}
+void ComparePointsMatcher::match() {
   struct StackElement {
     HWModuleOp lhsCurrent, rhsCurrent;
     StringRef instanceName;
