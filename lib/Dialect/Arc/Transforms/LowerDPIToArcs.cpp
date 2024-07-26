@@ -52,46 +52,82 @@ using namespace circt;
 //===----------------------------------------------------------------------===//
 
 namespace {
+
+struct LoweringState {
+  DenseMap<StringAttr, func::FuncOp> dpiFuncDeclMapping;
+  // Result types to pass through Arc.
+  DenseMap<mlir::TypeRange, arc::DefineOp> passthroughMapping;
+};
 struct LowerDPIToArcsPass
     : public arc::impl::LowerDPIToArcsBase<LowerDPIToArcsPass> {
 
   LogicalResult lowerDPI();
   LogicalResult lowerDPIFuncOp(sim::DPIFuncOp simFunc,
-                               DenseMap<StringAttr, arc::DefineOp> &symToArcDef,
+                               LoweringState &loweringState,
                                SymbolTable &symbolTable);
   void runOnOperation() override;
 };
 
 struct DPICallOpLowering : public OpConversionPattern<sim::DPICallOp> {
-  DPICallOpLowering(const DenseMap<StringAttr, arc::DefineOp> &symToArcDef,
+  DPICallOpLowering(const LoweringState &loweringState,
                     const TypeConverter &typeConverter, MLIRContext *context)
-      : OpConversionPattern(typeConverter, context), symToArcDef(symToArcDef) {}
+      : OpConversionPattern(typeConverter, context),
+        loweringState(loweringState) {}
   LogicalResult
   matchAndRewrite(sim::DPICallOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const final {
     auto enable = adaptor.getEnable();
+    if (enable)
+      // TODO: Lower it to scf.if
+      return op->emitError("unclocked call with enable is unsupported now");
+
     auto clock = adaptor.getClock();
+
+    auto funcDecl =
+        loweringState.dpiFuncDeclMapping.at(op.getCalleeAttr().getAttr());
     if (clock) {
       // Replace DPI call with a state. Latency is 1 for clocked one.
-      rewriter.replaceOpWithNewOp<arc::StateOp>(
-          op, symToArcDef.at(op.getCalleeAttr().getAttr()), clock, enable,
-          /*latency=*/1, adaptor.getInputs());
+      auto clockDomain = rewriter.create<arc::ClockDomainOp>(
+          op->getLoc(), op->getResultTypes(),
+          op.getOperands().drop_front(1), // drop clock
+          op.getClock());
+      auto &block = clockDomain.getBody().emplaceBlock();
+      SmallVector<Location> locs;
+      for (auto op : op.getOperands().drop_front(1))
+        block.addArgument(op.getType(), op.getLoc());
+      rewriter.setInsertionPointToStart(&block);
+      auto call = rewriter.create<func::CallOp>(op->getLoc(), funcDecl,
+                                                block.getArguments());
+      if (call->getNumResults() != 0) {
+        // Add a pass through.
+        auto passthrough =
+            loweringState.passthroughMapping.at(call.getResultTypes());
+
+        auto finalResults = rewriter.create<arc::StateOp>(
+            op.getLoc(), passthrough, /*clock=*/Value(),
+            /*enable=*/Value(), /*latency*/ 1, call->getResults());
+        rewriter.create<arc::OutputOp>(op.getLoc(), finalResults->getResults());
+      }
+      rewriter.replaceOp(op, clockDomain);
+
+      // scf.if %enable {
+      //
+      // } else {
+      //   hw.constant 0: result // for dummy. It's not enabled anyway.
+      // }
+      // arc.state @passthrough(%i) enable enable
     } else {
       // Unclocked call.
-      if (enable)
-        // TODO: Lower it to scf.if
-        return op->emitError("unclocked call with enable is unsupported now");
 
       // Replace DPI call with a call since latency is 0.
-      rewriter.replaceOpWithNewOp<arc::CallOp>(
-          op, symToArcDef.at(op.getCalleeAttr().getAttr()),
-          adaptor.getInputs());
+      rewriter.replaceOpWithNewOp<func::CallOp>(op, funcDecl,
+                                                adaptor.getInputs());
     }
     return success();
   }
 
 private:
-  const DenseMap<StringAttr, arc::DefineOp> &symToArcDef;
+  const LoweringState &loweringState;
 };
 
 } // namespace
@@ -110,9 +146,9 @@ static void populateTypeConversion(TypeConverter &typeConverter) {
   typeConverter.addConversion([&](Type type) { return type; });
 }
 
-LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(
-    sim::DPIFuncOp simFunc, DenseMap<StringAttr, arc::DefineOp> &symToArcDef,
-    SymbolTable &symbolTable) {
+LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(sim::DPIFuncOp simFunc,
+                                                 LoweringState &loweringState,
+                                                 SymbolTable &symbolTable) {
   ImplicitLocOpBuilder builder(simFunc.getLoc(), simFunc);
   auto moduleType = simFunc.getModuleType();
 
@@ -158,11 +194,31 @@ LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(
   arcDefName += "_dpi_arc";
   // FIXME: Unique symbol.
   auto arcOp =
-      builder.create<arc::DefineOp>(arcDefName, moduleType.getFuncType());
+      builder.create<func::FuncOp>(arcDefName, moduleType.getFuncType());
 
-  auto inserted = symToArcDef.insert({simFunc.getSymNameAttr(), arcOp}).second;
+  auto inserted =
+      loweringState.dpiFuncDeclMapping.insert({simFunc.getSymNameAttr(), arcOp})
+          .second;
   (void)inserted;
   assert(inserted && "symbol must be unique");
+
+  // Create a pass through Arc for a non-void function.
+  if (moduleType.getFuncType().getNumResults() != 0) {
+    auto resultTypes = moduleType.getFuncType().getResults();
+    auto &passthrough = loweringState.passthroughMapping[resultTypes];
+    if (!passthrough) {
+      passthrough = builder.create<arc::DefineOp>(
+          simFunc->getLoc(), "passthrough",
+          builder.getFunctionType(resultTypes, resultTypes));
+      // if (failed(symbolTable.renameToUnique(passthrough, {&symbolTable})))
+      //   return failure();
+      auto *block = passthrough.addEntryBlock();
+      builder.setInsertionPointToStart(block);
+      builder.create<arc::OutputOp>(simFunc->getLoc(),
+                                    block->getArguments()); // Passthrough.
+    }
+    passthrough->dump();
+  }
 
   builder.setInsertionPointToStart(arcOp.addEntryBlock());
   SmallVector<Value> functionInputs;
@@ -191,7 +247,7 @@ LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(
     results.push_back(builder.create<LLVM::LoadOp>(
         functionOutputAlloca.getElemType(), functionOutputAlloca));
 
-  builder.create<arc::OutputOp>(results);
+  builder.create<func::ReturnOp>(results);
 
   simFunc.erase();
   return success();
@@ -200,11 +256,11 @@ LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(
 LogicalResult LowerDPIToArcsPass::lowerDPI() {
   LLVM_DEBUG(llvm::dbgs() << "Lowering DPI to arc and func\n");
   auto op = getOperation();
-  DenseMap<StringAttr, arc::DefineOp> symToArcDef;
+  DenseMap<StringAttr, func::FuncOp> symToArcDef;
   auto &symbolTable = getAnalysis<SymbolTable>();
-
+  LoweringState state;
   for (auto simFunc : llvm::make_early_inc_range(op.getOps<sim::DPIFuncOp>()))
-    if (failed(lowerDPIFuncOp(simFunc, symToArcDef, symbolTable)))
+    if (failed(lowerDPIFuncOp(simFunc, state, symbolTable)))
       return failure();
 
   ConversionTarget target(getContext());
@@ -212,7 +268,7 @@ LogicalResult LowerDPIToArcsPass::lowerDPI() {
   RewritePatternSet patterns(&getContext());
   populateLegality(target);
   populateTypeConversion(converter);
-  patterns.add<DPICallOpLowering>(symToArcDef, converter, &getContext());
+  patterns.add<DPICallOpLowering>(state, converter, &getContext());
   return applyPartialConversion(getOperation(), target, std::move(patterns));
 }
 
