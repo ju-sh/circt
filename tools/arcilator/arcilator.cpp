@@ -267,8 +267,6 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
     pm.addPass(createConvertToArcsPass(opts));
   }
 
-  pm.addPass(arc::createLowerDPIToArcsPass());
-
   if (shouldDedup)
     pm.addPass(arc::createDedupPass());
   pm.addPass(hw::createFlattenModulesPass());
@@ -310,6 +308,8 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
   // Lower stateful arcs into explicit state reads and writes.
   if (untilReached(UntilStateLowering))
     return;
+
+  pm.addPass(arc::createLowerDPIFuncPass());
   pm.addPass(arc::createLowerStatePass());
   pm.addPass(createCSEPass());
   pm.addPass(arc::createArcCanonicalizerPass());

@@ -170,9 +170,9 @@ def LowerClocksToFuncs : Pass<"arc-lower-clocks-to-funcs", "mlir::ModuleOp"> {
   let dependentDialects = ["mlir::func::FuncDialect", "mlir::scf::SCFDialect"];
 }
 
-def LowerDPIToArcs : Pass<"arc-lower-sim-to-arcs", "mlir::ModuleOp"> {
+def LowerDPIFunc : Pass<"arc-lower-sim-to-arcs", "mlir::ModuleOp"> {
   let summary = "Lower DPI ops into arc and func ops";
-  let constructor = "circt::arc::createLowerDPIToArcsPass()";
+  let constructor = "circt::arc::createLowerDPIFuncPass()";
   let dependentDialects = ["mlir::func::FuncDialect", "mlir::LLVM::LLVMDialect", "arc::ArcDialect"];
 }
 
