@@ -23,6 +23,7 @@
 #include "circt/Dialect/HW/HWPasses.h"
 #include "circt/Dialect/Seq/SeqPasses.h"
 #include "circt/Dialect/Sim/SimDialect.h"
+#include "circt/Dialect/Sim/SimPasses.h"
 #include "circt/InitAllDialects.h"
 #include "circt/InitAllPasses.h"
 #include "circt/Support/Passes.h"
@@ -254,21 +255,18 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
     opts.tapMemories = observeMemories;
     pm.addPass(arc::createInferMemoriesPass(opts));
   }
+  pm.addPass(sim::createLowerDPIFunc());
   pm.addPass(createCSEPass());
   pm.addPass(arc::createArcCanonicalizerPass());
 
   // Restructure the input from a `hw.module` hierarchy to a collection of arcs.
   if (untilReached(UntilArcConversion))
     return;
-
   {
     ConvertToArcsOptions opts;
     opts.tapRegisters = observeRegisters;
     pm.addPass(createConvertToArcsPass(opts));
   }
-
-  pm.addPass(arc::createLowerDPIToArcsPass());
-
   if (shouldDedup)
     pm.addPass(arc::createDedupPass());
   pm.addPass(hw::createFlattenModulesPass());
@@ -310,6 +308,7 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
   // Lower stateful arcs into explicit state reads and writes.
   if (untilReached(UntilStateLowering))
     return;
+
   pm.addPass(arc::createLowerStatePass());
   pm.addPass(createCSEPass());
   pm.addPass(arc::createArcCanonicalizerPass());
