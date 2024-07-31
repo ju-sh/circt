@@ -263,7 +263,7 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
     return;
 
 
-  pm.addPass(arc::createLowerDPIToArcsPass());
+  pm.addPass(arc::createLowerDPIFuncPass());
 
   {
     ConvertToArcsOptions opts;
