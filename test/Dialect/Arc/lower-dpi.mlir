@@ -2,7 +2,7 @@
 
 sim.func.dpi @foo(out arg0: i32, in %arg1: i32, out arg2: i32)
 // CHECK-LABEL:  func.func private @foo(!llvm.ptr, i32, !llvm.ptr)
-// CHECK-LABEL:  func.func @foo_dpi_arc(%arg0: i32) -> (i32, i32) {
+// CHECK-LABEL:  func.func @foo_wrapper(%arg0: i32) -> (i32, i32) {
 // CHECK-NEXT:    %0 = llvm.mlir.constant(1 : i64) : i64
 // CHECK-NEXT:    %1 = llvm.alloca %0 x i32 : (i64) -> !llvm.ptr
 // CHECK-NEXT:    %2 = llvm.mlir.constant(1 : i64) : i64
@@ -16,13 +16,8 @@ sim.func.dpi @foo(out arg0: i32, in %arg1: i32, out arg2: i32)
 // CHECK-LABEL: hw.module @dpi_call
 hw.module @dpi_call(in %clock : !seq.clock, in %enable : i1, in %in: i32,
           out o1: i32, out o2: i32, out o3: i32, out o4: i32) {
-  // CHECK-NEXT: %0:2 = arc.clock_domain (%in) clock %clock : (i32) -> (i32, i32) { 
-  // CHECK-NEXT: ^bb0(%arg0: i32):
-  // CHECK-NEXT:   %2:2 = func.call @foo_dpi_arc(%arg0) : (i32) -> (i32, i32)
-  // CHECK-NEXT:   %3:2 = arc.state @passthrough(%2#0, %2#1) latency 1 : (i32, i32) -> (i32, i32)
-  // CHECK-NEXT:   arc.output %3#0, %3#1 : i32, i32
-  // CHECK-NEXT: }
-  // CHECK-NEXT: %1:2 = func.call @foo_dpi_arc(%in) : (i32) -> (i32, i32)
+  // CHECK-NEXT: %0:2 = sim.func.dpi.call @foo_wrapper(%in) clock %clock : (i32) -> (i32, i32)
+  // CHECK-NEXT: %1:2 = sim.func.dpi.call @foo_wrapper(%in) : (i32) -> (i32, i32)
   // CHECK-NEXT: hw.output %0#0, %0#1, %1#0, %1#1 : i32, i32, i32, i32
   %0, %1 = sim.func.dpi.call @foo(%in) clock %clock : (i32) -> (i32, i32)
   %2, %3 = sim.func.dpi.call @foo(%in) : (i32) -> (i32, i32)
