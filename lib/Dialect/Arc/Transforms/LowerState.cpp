@@ -12,6 +12,7 @@
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/Seq/SeqOps.h"
 #include "circt/Support/BackedgeBuilder.h"
+#include "circt/Dialect/Sim/SimOps.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
@@ -118,6 +119,7 @@ struct ModuleLowering {
   LogicalResult lowerPrimaryOutputs();
   LogicalResult lowerStates();
   LogicalResult lowerState(StateOp stateOp);
+  LogicalResult lowerState(sim::DPICallOp dpiCallOp);
   LogicalResult lowerState(MemoryOp memOp);
   LogicalResult lowerState(MemoryWritePortOp memWriteOp);
   LogicalResult lowerState(TapOp tapOp);
@@ -139,7 +141,7 @@ static bool shouldMaterialize(Operation *op) {
   return !isa<MemoryOp, AllocStateOp, AllocMemoryOp, AllocStorageOp,
               ClockTreeOp, PassThroughOp, RootInputOp, RootOutputOp,
               StateWriteOp, MemoryWritePortOp, igraph::InstanceOpInterface,
-              StateOp>(op);
+              StateOp, sim::DPICallOp>(op);
 }
 
 static bool shouldMaterialize(Value value) {
@@ -390,13 +392,13 @@ LogicalResult ModuleLowering::lowerPrimaryOutputs() {
 LogicalResult ModuleLowering::lowerStates() {
   SmallVector<Operation *> opsToLower;
   for (auto &op : *moduleOp.getBodyBlock())
-    if (isa<StateOp, MemoryOp, MemoryWritePortOp, TapOp>(&op))
+    if (isa<StateOp, MemoryOp, MemoryWritePortOp, TapOp, sim::DPICallOp>(&op))
       opsToLower.push_back(&op);
 
   for (auto *op : opsToLower) {
     LLVM_DEBUG(llvm::dbgs() << "- Lowering " << *op << "\n");
     auto result = TypeSwitch<Operation *, LogicalResult>(op)
-                      .Case<StateOp, MemoryOp, MemoryWritePortOp, TapOp>(
+                      .Case<StateOp, MemoryOp, MemoryWritePortOp, TapOp, sim::DPICallOp>(
                           [&](auto op) { return lowerState(op); })
                       .Default(success());
     if (failed(result))
@@ -490,6 +492,69 @@ LogicalResult ModuleLowering::lowerState(StateOp stateOp) {
   for (auto [alloc, result] : llvm::zip(allocatedStates, stateOp.getResults()))
     replaceValueWithStateRead(result, alloc);
   stateOp.erase();
+  return success();
+}
+
+LogicalResult ModuleLowering::lowerState(sim::DPICallOp callOp) {
+  // Grab all operands from the state op and make it drop all its references.
+  // This allows `materializeValue` to move an operation if this state was the
+  // last user.
+  auto stateClock = callOp.getClock();
+  auto stateEnable = callOp.getEnable();
+  auto stateInputs = SmallVector<Value>(callOp.getInputs());
+
+  // Get the clock tree and enable condition for this state's clock. If this arc
+  // carries an explicit enable condition, fold that into the enable provided by
+  // the clock gates in the arc's clock tree.
+  auto info = getOrCreateClockLowering(stateClock);
+  info.enable = info.clock.getOrCreateAnd(
+      info.enable, info.clock.materializeValue(stateEnable), callOp.getLoc());
+
+  // Allocate the necessary state within the model.
+  SmallVector<Value> allocatedStates;
+  for (unsigned stateIdx = 0; stateIdx < callOp.getNumResults(); ++stateIdx) {
+    auto type = callOp.getResult(stateIdx).getType();
+    auto intType = dyn_cast<IntegerType>(type);
+    if (!intType)
+      return callOp.emitOpError("result ")
+             << stateIdx << " has non-integer type " << type
+             << "; only integer types are supported";
+    auto stateType = StateType::get(intType);
+    auto state = stateBuilder.create<AllocStateOp>(callOp.getLoc(), stateType,
+                                                   storageArg);
+    if (auto names = callOp->getAttrOfType<ArrayAttr>("names"))
+      state->setAttr("name", names[stateIdx]);
+    allocatedStates.push_back(state);
+  }
+
+  // Create a copy of the arc use with latency zero. This will effectively be
+  // the computation of the arc's transfer function, while the latency is
+  // implemented through read and write functions.
+  SmallVector<Value> materializedOperands;
+  materializedOperands.reserve(stateInputs.size());
+
+  for (auto input : stateInputs)
+    materializedOperands.push_back(info.clock.materializeValue(input));
+
+  OpBuilder nonResetBuilder = info.clock.builder;
+
+  callOp->dropAllReferences();
+
+  auto newStateOp = nonResetBuilder.create<func::CallOp>(
+      callOp.getLoc(), callOp.getResultTypes(), callOp.getCalleeAttr(),
+      materializedOperands);
+
+  // Create the write ops that write the result of the transfer function to the
+  // allocated state storage.
+  for (auto [alloc, result] :
+       llvm::zip(allocatedStates, newStateOp.getResults()))
+    nonResetBuilder.create<StateWriteOp>(callOp.getLoc(), alloc, result,
+                                         info.enable);
+
+  // Replace all uses of the arc with reads from the allocated state.
+  for (auto [alloc, result] : llvm::zip(allocatedStates, callOp.getResults()))
+    replaceValueWithStateRead(result, alloc);
+  callOp.erase();
   return success();
 }
 

@@ -191,7 +191,6 @@ LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(sim::DPIFuncOp simFunc,
   // Create an Arc.
   SmallString<8> arcDefName;
   arcDefName += simFunc.getSymName();
-  arcDefName += "_dpi_arc";
   // FIXME: Unique symbol.
   auto arcOp =
       builder.create<func::FuncOp>(arcDefName, moduleType.getFuncType());
@@ -203,22 +202,22 @@ LogicalResult LowerDPIToArcsPass::lowerDPIFuncOp(sim::DPIFuncOp simFunc,
   assert(inserted && "symbol must be unique");
 
   // Create a pass through Arc for a non-void function.
-  if (moduleType.getFuncType().getNumResults() != 0) {
-    auto resultTypes = moduleType.getFuncType().getResults();
-    auto &passthrough = loweringState.passthroughMapping[resultTypes];
-    if (!passthrough) {
-      passthrough = builder.create<arc::DefineOp>(
-          simFunc->getLoc(), "passthrough",
-          builder.getFunctionType(resultTypes, resultTypes));
-      // if (failed(symbolTable.renameToUnique(passthrough, {&symbolTable})))
-      //   return failure();
-      auto *block = passthrough.addEntryBlock();
-      builder.setInsertionPointToStart(block);
-      builder.create<arc::OutputOp>(simFunc->getLoc(),
-                                    block->getArguments()); // Passthrough.
-    }
-    passthrough->dump();
-  }
+  // if (moduleType.getFuncType().getNumResults() != 0) {
+  //   auto resultTypes = moduleType.getFuncType().getResults();
+  //   auto &passthrough = loweringState.passthroughMapping[resultTypes];
+  //   if (!passthrough) {
+  //     passthrough = builder.create<arc::DefineOp>(
+  //         simFunc->getLoc(), "passthrough",
+  //         builder.getFunctionType(resultTypes, resultTypes));
+  //     // if (failed(symbolTable.renameToUnique(passthrough, {&symbolTable})))
+  //     //   return failure();
+  //     auto *block = passthrough.addEntryBlock();
+  //     builder.setInsertionPointToStart(block);
+  //     builder.create<arc::OutputOp>(simFunc->getLoc(),
+  //                                   block->getArguments()); // Passthrough.
+  //   }
+  //   passthrough->dump();
+  // }
 
   builder.setInsertionPointToStart(arcOp.addEntryBlock());
   SmallVector<Value> functionInputs;
@@ -262,14 +261,14 @@ LogicalResult LowerDPIToArcsPass::lowerDPI() {
   for (auto simFunc : llvm::make_early_inc_range(op.getOps<sim::DPIFuncOp>()))
     if (failed(lowerDPIFuncOp(simFunc, state, symbolTable)))
       return failure();
-
-  ConversionTarget target(getContext());
-  TypeConverter converter;
-  RewritePatternSet patterns(&getContext());
-  populateLegality(target);
-  populateTypeConversion(converter);
-  patterns.add<DPICallOpLowering>(state, converter, &getContext());
-  return applyPartialConversion(getOperation(), target, std::move(patterns));
+  return success();
+  // ConversionTarget target(getContext());
+  // TypeConverter converter;
+  // RewritePatternSet patterns(&getContext());
+  // populateLegality(target);
+  // populateTypeConversion(converter);
+  // patterns.add<DPICallOpLowering>(state, converter, &getContext());
+  // return applyPartialConversion(getOperation(), target, std::move(patterns));
 }
 
 void LowerDPIToArcsPass::runOnOperation() {
