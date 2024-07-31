@@ -257,20 +257,15 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
   pm.addPass(createCSEPass());
   pm.addPass(arc::createArcCanonicalizerPass());
 
-
   // Restructure the input from a `hw.module` hierarchy to a collection of arcs.
   if (untilReached(UntilArcConversion))
     return;
-
-
-  pm.addPass(arc::createLowerDPIFuncPass());
 
   {
     ConvertToArcsOptions opts;
     opts.tapRegisters = observeRegisters;
     pm.addPass(createConvertToArcsPass(opts));
   }
-
 
   if (shouldDedup)
     pm.addPass(arc::createDedupPass());
@@ -314,6 +309,7 @@ static void populateHwModuleToArcPipeline(PassManager &pm) {
   if (untilReached(UntilStateLowering))
     return;
 
+  pm.addPass(arc::createLowerDPIFuncPass());
   pm.addPass(arc::createLowerStatePass());
   pm.addPass(createCSEPass());
   pm.addPass(arc::createArcCanonicalizerPass());
