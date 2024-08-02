@@ -14,6 +14,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/SHA256.h"
 
+#include <variant>
+
 #define DEBUG_TYPE "arc-dedup"
 
 namespace circt {

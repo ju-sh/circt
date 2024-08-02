@@ -13,6 +13,7 @@
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/Seq/SeqOps.h"
 #include "circt/Support/LLVM.h"
+#include "llvm/ADT/MapVector.h"
 #include "circt/Support/Namespace.h"
 #include "circt/Support/SymCache.h"
 

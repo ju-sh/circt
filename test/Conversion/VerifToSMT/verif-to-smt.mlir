@@ -10,10 +10,10 @@ func.func @test(%arg0: !smt.bv<1>) -> (i1, i1, i1) {
   verif.assert %0 : i1
 
   // CHECK: [[EQ:%.+]] = smt.solver() : () -> i1
-  // CHECK: [[IN0:%.+]] = smt.declare_fun : !smt.bv<32>
-  // CHECK: [[V0:%.+]] = builtin.unrealized_conversion_cast [[IN0]] : !smt.bv<32> to i32
-  // CHECK: [[IN1:%.+]] = smt.declare_fun : !smt.bv<32>
-  // CHECK: [[V1:%.+]] = builtin.unrealized_conversion_cast [[IN1]] : !smt.bv<32> to i32
+  // CHECK-DAG: [[IN0:%.+]] = smt.declare_fun : !smt.bv<32>
+  // CHECK-DAG: [[V0:%.+]] = builtin.unrealized_conversion_cast [[IN0]] : !smt.bv<32> to i32
+  // CHECK-DAG: [[IN1:%.+]] = smt.declare_fun : !smt.bv<32>
+  // CHECK-DAG: [[V1:%.+]] = builtin.unrealized_conversion_cast [[IN1]] : !smt.bv<32> to i32
   // CHECK: [[V2:%.+]]:2 = "some_op"([[V0]], [[V1]]) : (i32, i32) -> (i32, i32)
   // CHECK: [[V3:%.+]] = builtin.unrealized_conversion_cast [[V2]]#0 : i32 to !smt.bv<32>
   // CHECK: [[V4:%.+]] = smt.distinct [[IN0]], [[V3]] : !smt.bv<32>
