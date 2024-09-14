@@ -196,8 +196,7 @@ void AddSeqMemPortsPass::processMemModule(FMemModuleOp mem) {
 
 LogicalResult AddSeqMemPortsPass::processModule(FModuleOp module, bool isDUT) {
   auto *context = &getContext();
-  // Insert the new port connections at the end of the module.
-  auto builder = OpBuilder::atBlockEnd(module.getBodyBlock());
+  auto builder = OpBuilder(module.getContext());
   auto &memInfo = memInfoMap[module];
   auto &extraPorts = memInfo.extraPorts;
   // List of ports added to submodules which must be connected to this module's
@@ -207,7 +206,7 @@ LogicalResult AddSeqMemPortsPass::processModule(FModuleOp module, bool isDUT) {
   // The base index to use when adding ports to the current module.
   unsigned firstPortIndex = module.getNumPorts();
 
-  for (auto &op : llvm::make_early_inc_range(*module.getBodyBlock())) {
+  auto result = module.walk([&](Operation *op) {
     if (auto inst = dyn_cast<InstanceOp>(op)) {
       auto submodule = inst.getReferencedModule(*instanceGraph);
 
@@ -215,7 +214,7 @@ LogicalResult AddSeqMemPortsPass::processModule(FModuleOp module, bool isDUT) {
       // If there are no extra ports, we don't have to do anything.
       if (subMemInfoIt == memInfoMap.end() ||
           subMemInfoIt->second.extraPorts.empty())
-        continue;
+        return WalkResult::advance();
       auto &subMemInfo = subMemInfoIt->second;
       // Find out how many memory ports we have to add.
       auto &subExtraPorts = subMemInfo.extraPorts;
@@ -240,6 +239,20 @@ LogicalResult AddSeqMemPortsPass::processModule(FModuleOp module, bool isDUT) {
             StringAttr::get(context, "sram_" + Twine(sramIndex) + "_" +
                                          sramPort.name.getValue());
         auto portDirection = sramPort.direction;
+        // If the port direction is output, then ensure that this memory is not
+        // under a layerblock.
+        if (portDirection == Direction::Out) {
+          auto layerParent = inst->getParentOfType<LayerBlockOp>();
+          if (layerParent) {
+            auto diag = submodule->emitOpError()
+                        << "cannot have an output port added to it because it "
+                           "is instantiated under a layer block";
+            diag.attachNote(layerParent.getLoc())
+                << "the memory is instantiated under this layer block";
+            diag.attachNote(inst.getLoc()) << "the memory is instantiated here";
+            return WalkResult::interrupt();
+          }
+        }
         auto portType = sramPort.type;
         // Record the extra port.
         extraPorts.push_back(
@@ -272,20 +285,35 @@ LogicalResult AddSeqMemPortsPass::processModule(FModuleOp module, bool isDUT) {
           instancePaths.back().push_back(ref);
         }
       }
+
+      return WalkResult::advance();
     }
-  }
+
+    return WalkResult::advance();
+  });
+
+  if (result.wasInterrupted())
+    return failure();
 
   // Add the extra ports to this module.
   module.insertPorts(extraPorts);
 
   // Connect the submodule ports to the parent module ports.
+  DenseMap<Operation *, OpBuilder::InsertPoint> instToInsertionPoint;
   for (unsigned i = 0, e = values.size(); i < e; ++i) {
     auto &[firstArg, port] = extraPorts[i];
     Value modulePort = module.getArgument(firstArg + i);
     Value instPort = values[i];
+    Operation *instOp = instPort.getDefiningOp();
+    auto insertPoint = instToInsertionPoint.find(instOp);
+    if (insertPoint == instToInsertionPoint.end())
+      builder.setInsertionPointAfter(instOp);
+    else
+      builder.restoreInsertionPoint(insertPoint->getSecond());
     if (port.direction == Direction::In)
       std::swap(modulePort, instPort);
     builder.create<MatchingConnectOp>(port.loc, modulePort, instPort);
+    instToInsertionPoint[instOp] = builder.saveInsertionPoint();
   }
   return success();
 }
