@@ -127,7 +127,7 @@ struct ModuleLowering {
   LogicalResult lowerPrimaryInputs();
   LogicalResult lowerPrimaryOutputs();
   LogicalResult lowerStates();
-  LogicalResult lowerInitals();
+  LogicalResult lowerInitials();
   template <typename CallTy>
   LogicalResult lowerStateLike(Operation *op, Value clock, Value enable,
                                Value reset, ArrayRef<Value> inputs,
@@ -426,12 +426,15 @@ LogicalResult ModuleLowering::lowerPrimaryOutputs() {
   return success();
 }
 
-LogicalResult ModuleLowering::lowerInitals() {
+LogicalResult ModuleLowering::lowerInitials() {
+  // Move all operations except for seq.yield to arc.initial op.
   for (auto op : moduleOp.getOps<seq::InitialOp>()) {
     auto terminator = cast<seq::YieldOp>(op.getBodyBlock()->getTerminator());
     getInitial().builder.getBlock()->getOperations().splice(
         getInitial().builder.getBlock()->begin(),
         op.getBodyBlock()->getOperations());
+
+    // Map seq.initial results to 
     for (auto [result, operand] :
          llvm::zip(op.getResults(), terminator.getOperands()))
       getInitial().materializedValues.map(result, operand);
@@ -903,9 +906,8 @@ LogicalResult LowerStatePass::runOnModule(HWModuleOp moduleOp,
   lowering.clockBuilder.setInsertionPoint(clockSentinel);
 
   lowering.addStorageArg();
-  if (failed(lowering.lowerInitals()))
+  if (failed(lowering.lowerInitials()))
     return failure();
-
   if (failed(lowering.lowerPrimaryInputs()))
     return failure();
   if (failed(lowering.lowerPrimaryOutputs()))
